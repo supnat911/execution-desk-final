@@ -1,0 +1,84 @@
+name: Build Execution Desk v0.5.0 Strategy OS
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ExecutionDesk_v050_STRATEGY_OS.bin
+      - .github/workflows/build-v050.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 34
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Set up Gradle 8.2.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.2.1"
+
+      - name: Verify and extract v0.5.0 project
+        shell: bash
+        run: |
+          test -f ExecutionDesk_v050_STRATEGY_OS.bin
+          unzip -t ExecutionDesk_v050_STRATEGY_OS.bin
+
+          rm -rf extracted-v050
+          mkdir extracted-v050
+          unzip -q ExecutionDesk_v050_STRATEGY_OS.bin -d extracted-v050
+
+          PROJECT_DIR="extracted-v050/ExecutionDesk_v050"
+          test -f "$PROJECT_DIR/V050_STRATEGY_OS_MARKER.txt"
+          test -f "$PROJECT_DIR/settings.gradle.kts"
+          grep -Fq 'versionName = "0.5.0"' "$PROJECT_DIR/app/build.gradle.kts"
+          grep -Fq 'versionCode = 8' "$PROJECT_DIR/app/build.gradle.kts"
+          grep -Fq 'moonWeightPoints' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'MoonCycle.current()' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/TradeGrader.java"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Verified Execution Desk v0.5.0 at $PROJECT_DIR"
+
+      - name: Build stable signed release APK
+        shell: bash
+        run: |
+          cd "$PROJECT_DIR"
+          gradle :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Verify and prepare APK
+        shell: bash
+        run: |
+          APK="$PROJECT_DIR/app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose "$APK"
+          cp "$APK" "$GITHUB_WORKSPACE/ExecutionDesk-v050.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: execution-desk-v050-strategy-os-apk
+          path: ExecutionDesk-v050.apk
+          if-no-files-found: error
