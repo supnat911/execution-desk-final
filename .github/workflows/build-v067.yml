@@ -1,0 +1,88 @@
+name: Build Execution Desk v0.6.7 Streamlined Desk
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ExecutionDesk_v067_STREAMLINED_DESK.bin
+      - .github/workflows/build-v067.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 34
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Set up Gradle 8.2.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.2.1"
+
+      - name: Verify and extract v0.6.7 project
+        shell: bash
+        run: |
+          test -f ExecutionDesk_v067_STREAMLINED_DESK.bin
+          unzip -t ExecutionDesk_v067_STREAMLINED_DESK.bin
+
+          rm -rf extracted-v067
+          mkdir extracted-v067
+          unzip -q ExecutionDesk_v067_STREAMLINED_DESK.bin -d extracted-v067
+
+          PROJECT_DIR="extracted-v067/ExecutionDesk_v067"
+          test -f "$PROJECT_DIR/V067_STREAMLINED_DESK_MARKER.txt"
+          test -f "$PROJECT_DIR/settings.gradle.kts"
+          grep -Fq 'versionName = "0.6.7"' "$PROJECT_DIR/app/build.gradle.kts"
+          grep -Fq 'versionCode = 16' "$PROJECT_DIR/app/build.gradle.kts"
+          grep -Fq 'next-trade-desk-v1.2.2' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/AppStore.java"
+          grep -Fq 'function renderDeskExecutionRunway' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'NEXT TRADE RUNWAY' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'Market context & controls' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'function renderSafely' "$PROJECT_DIR/app/src/main/assets/app.js"
+          node --check "$PROJECT_DIR/app/src/main/assets/app.js"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Verified Execution Desk v0.6.7 at $PROJECT_DIR"
+
+      - name: Build stable signed release APK
+        shell: bash
+        run: |
+          cd "$PROJECT_DIR"
+          gradle :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Verify and prepare APK
+        shell: bash
+        run: |
+          APK="$PROJECT_DIR/app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose "$APK"
+          cp "$APK" "$GITHUB_WORKSPACE/ExecutionDesk-v067.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: execution-desk-v067-streamlined-desk-apk
+          path: ExecutionDesk-v067.apk
+          if-no-files-found: error
