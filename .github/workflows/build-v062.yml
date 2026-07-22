@@ -1,0 +1,90 @@
+name: Build Execution Desk v0.6.2 Transition Pivot
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ExecutionDesk_v062_TRANSITION_PIVOT.bin
+      - .github/workflows/build-v062.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 34
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Set up Gradle 8.2.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.2.1"
+
+      - name: Verify and extract v0.6.2 project
+        shell: bash
+        run: |
+          test -f ExecutionDesk_v062_TRANSITION_PIVOT.bin
+          unzip -t ExecutionDesk_v062_TRANSITION_PIVOT.bin
+
+          rm -rf extracted-v062
+          mkdir extracted-v062
+          unzip -q ExecutionDesk_v062_TRANSITION_PIVOT.bin -d extracted-v062
+
+          PROJECT_DIR="extracted-v062/ExecutionDesk_v062"
+          test -f "$PROJECT_DIR/V062_TRANSITION_PIVOT_MARKER.txt"
+          test -f "$PROJECT_DIR/settings.gradle.kts"
+          grep -Fq 'versionName = "0.6.2"' "$PROJECT_DIR/app/build.gradle.kts"
+          grep -Fq 'versionCode = 11' "$PROJECT_DIR/app/build.gradle.kts"
+          grep -Fq 'transition-pivot-v1.2.0' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/AppStore.java"
+          grep -Fq 'classifyExecutionState' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/MarketAnalyzer.java"
+          grep -Fq 'pivotWickSignal' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/MarketAnalyzer.java"
+          grep -Fq 'REVERSAL_CONFIRMED' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/MarketAnalyzer.java"
+          grep -Fq 'autoPivot' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/TradeGrader.java"
+          grep -Fq 'pivot_scout' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/TradeGrader.java"
+          grep -Fq 'Pivot permission is no longer active' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'Transition pivot scout' "$PROJECT_DIR/app/src/main/assets/app.js"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Verified Execution Desk v0.6.2 at $PROJECT_DIR"
+
+      - name: Build stable signed release APK
+        shell: bash
+        run: |
+          cd "$PROJECT_DIR"
+          gradle :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Verify and prepare APK
+        shell: bash
+        run: |
+          APK="$PROJECT_DIR/app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose "$APK"
+          cp "$APK" "$GITHUB_WORKSPACE/ExecutionDesk-v062.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: execution-desk-v062-transition-pivot-apk
+          path: ExecutionDesk-v062.apk
+          if-no-files-found: error
