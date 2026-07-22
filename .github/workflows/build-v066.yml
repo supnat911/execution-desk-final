@@ -1,0 +1,91 @@
+name: Build Execution Desk v0.6.6 Clean Recovery
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ExecutionDesk_v066_CLEAN_BUILD.bin
+      - .github/workflows/build-v066-clean.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 34
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Set up Gradle 8.2.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.2.1"
+
+      - name: Verify and extract v0.6.6 clean project
+        shell: bash
+        run: |
+          test -f ExecutionDesk_v066_CLEAN_BUILD.bin
+          unzip -t ExecutionDesk_v066_CLEAN_BUILD.bin
+
+          rm -rf extracted-v066
+          mkdir extracted-v066
+          unzip -q ExecutionDesk_v066_CLEAN_BUILD.bin -d extracted-v066
+
+          PROJECT_DIR="extracted-v066/ExecutionDesk_v066"
+          test -f "$PROJECT_DIR/V066_CLEAN_BUILD_MARKER.txt"
+          test -f "$PROJECT_DIR/V066_RENDER_RECOVERY_MARKER.txt"
+          test -f "$PROJECT_DIR/settings.gradle.kts"
+          grep -Fq 'versionName = "0.6.6"' "$PROJECT_DIR/app/build.gradle.kts"
+          grep -Fq 'versionCode = 15' "$PROJECT_DIR/app/build.gradle.kts"
+          grep -Fq 'next-trade-desk-v1.2.2' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/AppStore.java"
+          grep -Fq 'function renderSafely' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'function validPrice(value)' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'c.assets = safeArray(c.assets)' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'app.state.account.openOrders = safeArray' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'runwayNowStrip' "$PROJECT_DIR/app/src/main/assets/styles.css"
+          grep -Fq 'MARK ${compactSignedMoney' "$PROJECT_DIR/app/src/main/assets/app.js"
+          node --check "$PROJECT_DIR/app/src/main/assets/app.js"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Verified Execution Desk v0.6.6 clean recovery at $PROJECT_DIR"
+
+      - name: Build stable signed release APK
+        shell: bash
+        run: |
+          cd "$PROJECT_DIR"
+          gradle :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Verify and prepare APK
+        shell: bash
+        run: |
+          APK="$PROJECT_DIR/app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose "$APK"
+          cp "$APK" "$GITHUB_WORKSPACE/ExecutionDesk-v066.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: execution-desk-v066-clean-recovery-apk
+          path: ExecutionDesk-v066.apk
+          if-no-files-found: error
