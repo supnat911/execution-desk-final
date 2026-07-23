@@ -1,0 +1,94 @@
+name: Build Execution Desk v0.7.3 Performance Foundation and Backlit Runway
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ExecutionDesk_v073_PERFORMANCE_FOUNDATION_BACKLIT_RUNWAY.bin
+      - .github/workflows/build-v073.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 34
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Set up Gradle 8.2.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.2.1"
+
+      - name: Verify and extract v0.7.3 project
+        shell: bash
+        run: |
+          test -f ExecutionDesk_v073_PERFORMANCE_FOUNDATION_BACKLIT_RUNWAY.bin
+          unzip -t ExecutionDesk_v073_PERFORMANCE_FOUNDATION_BACKLIT_RUNWAY.bin
+
+          rm -rf extracted-v073
+          mkdir extracted-v073
+          unzip -q ExecutionDesk_v073_PERFORMANCE_FOUNDATION_BACKLIT_RUNWAY.bin -d extracted-v073
+
+          PROJECT_DIR="extracted-v073/ExecutionDesk_v073"
+          test -f "$PROJECT_DIR/V073_PERFORMANCE_FOUNDATION_BACKLIT_RUNWAY_MARKER.txt"
+          test -f "$PROJECT_DIR/settings.gradle.kts"
+          test -f "$PROJECT_DIR/app/executiondesk-update-key.jks"
+          grep -Fq 'versionName = "0.7.3"' "$PROJECT_DIR/app/build.gradle.kts"
+          grep -Fq 'versionCode = 22' "$PROJECT_DIR/app/build.gradle.kts"
+          grep -Fq 'fetchPortfolio' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/HyperliquidClient.java"
+          grep -Fq 'profilePortfolioHistoryValue' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/PositionTracker.java"
+          grep -Fq 'stopCoverageQuantity' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/PositionTracker.java"
+          grep -Fq 'schema:4' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'ACTUAL ACCOUNT VALUE' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'IMPROVEMENT TARGET' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'PRICE RUNWAY V2.3' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'runwayBacklit' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'aggregatedPositionStops' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'runwayBacklit' "$PROJECT_DIR/app/src/main/assets/styles.css"
+          node --check "$PROJECT_DIR/app/src/main/assets/app.js"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Verified Execution Desk v0.7.3 at $PROJECT_DIR"
+
+      - name: Build stable signed release APK
+        shell: bash
+        run: |
+          cd "$PROJECT_DIR"
+          gradle :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Verify and prepare APK
+        shell: bash
+        run: |
+          APK="$PROJECT_DIR/app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose "$APK"
+          cp "$APK" "$GITHUB_WORKSPACE/ExecutionDesk-v073.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: execution-desk-v073-performance-foundation-backlit-runway-apk
+          path: ExecutionDesk-v073.apk
+          if-no-files-found: error
