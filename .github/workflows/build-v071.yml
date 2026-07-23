@@ -1,0 +1,92 @@
+name: Build Execution Desk v0.7.1 Performance and Runway Refinement
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ExecutionDesk_v071_PERFORMANCE_RUNWAY_REFINEMENT.bin
+      - .github/workflows/build-v071.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 34
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Set up Gradle 8.2.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.2.1"
+
+      - name: Verify and extract v0.7.1 project
+        shell: bash
+        run: |
+          test -f ExecutionDesk_v071_PERFORMANCE_RUNWAY_REFINEMENT.bin
+          unzip -t ExecutionDesk_v071_PERFORMANCE_RUNWAY_REFINEMENT.bin
+
+          rm -rf extracted-v071
+          mkdir extracted-v071
+          unzip -q ExecutionDesk_v071_PERFORMANCE_RUNWAY_REFINEMENT.bin -d extracted-v071
+
+          PROJECT_DIR="extracted-v071/ExecutionDesk_v071"
+          test -f "$PROJECT_DIR/V071_PERFORMANCE_RUNWAY_REFINEMENT_MARKER.txt"
+          test -f "$PROJECT_DIR/settings.gradle.kts"
+          grep -Fq 'versionName = "0.7.1"' "$PROJECT_DIR/app/build.gradle.kts"
+          grep -Fq 'versionCode = 20' "$PROJECT_DIR/app/build.gradle.kts"
+          grep -Fq 'next-trade-desk-v1.2.2' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/AppStore.java"
+          grep -Fq 'performanceBasis' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'normalizePerformanceRows' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'sourceMismatch' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'Profile total' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'runwayMomentumScale' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'STRONG' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'runwayLane5' "$PROJECT_DIR/app/src/main/assets/styles.css"
+          grep -Fq '<b>Performance</b>' "$PROJECT_DIR/app/src/main/assets/index.html"
+          node --check "$PROJECT_DIR/app/src/main/assets/app.js"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Verified Execution Desk v0.7.1 at $PROJECT_DIR"
+
+      - name: Build stable signed release APK
+        shell: bash
+        run: |
+          cd "$PROJECT_DIR"
+          gradle :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Verify and prepare APK
+        shell: bash
+        run: |
+          APK="$PROJECT_DIR/app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose "$APK"
+          cp "$APK" "$GITHUB_WORKSPACE/ExecutionDesk-v071.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: execution-desk-v071-performance-runway-apk
+          path: ExecutionDesk-v071.apk
+          if-no-files-found: error
