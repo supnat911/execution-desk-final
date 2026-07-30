@@ -1,0 +1,106 @@
+name: Build Execution Desk v0.8.0 Lunar Regime and Chart Control
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ExecutionDesk_v080_LUNAR_REGIME_ENGINE.bin
+      - .github/workflows/build-v080.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 34
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Set up Gradle 8.2.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.2.1"
+
+      - name: Verify and extract v0.8.0 project
+        shell: bash
+        run: |
+          test -f ExecutionDesk_v080_LUNAR_REGIME_ENGINE.bin
+          unzip -t ExecutionDesk_v080_LUNAR_REGIME_ENGINE.bin
+          rm -rf extracted-v080
+          mkdir extracted-v080
+          unzip -q ExecutionDesk_v080_LUNAR_REGIME_ENGINE.bin -d extracted-v080
+
+          PROJECT_DIR="extracted-v080/ExecutionDesk_v080"
+          test -f "$PROJECT_DIR/V080_LUNAR_REGIME_CHART_CONTROL_MARKER.txt"
+          test -f "$PROJECT_DIR/settings.gradle.kts"
+          test -f "$PROJECT_DIR/app/executiondesk-update-key.jks"
+          test -f "$PROJECT_DIR/keystore.properties"
+
+          grep -Fq 'versionName = "0.8.0"' "$PROJECT_DIR/app/build.gradle.kts"
+          grep -Fq 'versionCode = 28' "$PROJECT_DIR/app/build.gradle.kts"
+          grep -Fq 'lunar-first-v2.0.0' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/AppStore.java"
+          grep -Fq 'moonRegimeFirst' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/AppStore.java"
+
+          grep -Fq 'PRE_FULL_MOON_SQUEEZE' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/MoonCycle.java"
+          grep -Fq 'FULL_MOON_EXHAUSTION' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/MoonCycle.java"
+          grep -Fq 'WANING_BEARISH_PHASE' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/MoonCycle.java"
+          grep -Fq 'NEW_MOON_TRANSITION' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/MoonCycle.java"
+          grep -Fq 'WAXING_BULLISH_PHASE' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/MoonCycle.java"
+          grep -Fq 'tradePermission' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/MoonCycle.java"
+          grep -Fq 'MoonCycle.current(config, btcJson)' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/MarketEngine.java"
+          grep -Fq 'LUNAR REGIME GATE' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/TradeGrader.java"
+
+          grep -Fq 'renderMoonContext' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'openMoonSettings' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'renderLunarPerformance' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'FUTURE RUNWAY' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'rightSpace' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'priceScale' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'renderDeskPositionTabs' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'positionForSymbolSide(requestedSymbol)' "$PROJECT_DIR/app/src/main/assets/app.js"
+          grep -Fq 'fetchPerpDexs' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/HyperliquidClient.java"
+          grep -Fq 'canonicalSymbol' "$PROJECT_DIR/app/src/main/java/com/executiondesk/monitor/MarketEngine.java"
+
+          node --check "$PROJECT_DIR/app/src/main/assets/app.js"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Verified Execution Desk v0.8.0 at $PROJECT_DIR"
+
+      - name: Build stable signed release APK
+        shell: bash
+        run: |
+          cd "$PROJECT_DIR"
+          gradle :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Verify and prepare APK
+        shell: bash
+        run: |
+          APK="$PROJECT_DIR/app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose "$APK"
+          cp "$APK" "$GITHUB_WORKSPACE/ExecutionDesk-v080.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: execution-desk-v080-lunar-regime-chart-control-apk
+          path: ExecutionDesk-v080.apk
+          if-no-files-found: error
