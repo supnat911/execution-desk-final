@@ -9,9 +9,13 @@ on:
       - 'ExecutionDesk_v081_LUNAR_CAMPAIGN_ENGINE.bin'
       - '.github/workflows/build-v081.yml'
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 50
 
     steps:
       - name: Checkout repository
@@ -23,63 +27,118 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      
-    
-
-      - name: Install Android SDK packages
+      - name: Show Android environment
+        shell: bash
         run: |
-          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          test -d "$ANDROID_HOME"
+          ls "$ANDROID_HOME/platforms" || true
+          ls "$ANDROID_HOME/build-tools" || true
 
-      - name: Extract v0.8.1 source
+      - name: Set up Gradle 8.2.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.2.1'
+
+      - name: Verify and extract v0.8.1 project
+        shell: bash
         run: |
+          test -f ExecutionDesk_v081_LUNAR_CAMPAIGN_ENGINE.bin
+
+          unzip -t ExecutionDesk_v081_LUNAR_CAMPAIGN_ENGINE.bin
+
+          rm -rf extracted-v081
           mkdir -p extracted-v081
-          unzip -q ExecutionDesk_v081_LUNAR_CAMPAIGN_ENGINE.bin -d extracted-v081
-          find extracted-v081 -maxdepth 3 -type f | head -50
 
-      - name: Locate Android project
-        id: project
-        run: |
-          SETTINGS="$(find extracted-v081 -type f \( -name settings.gradle.kts -o -name settings.gradle \) | head -1)"
+          unzip -q ExecutionDesk_v081_LUNAR_CAMPAIGN_ENGINE.bin \
+            -d extracted-v081
+
+          SETTINGS="$(find extracted-v081 -type f \
+            \( -name settings.gradle.kts -o -name settings.gradle \) \
+            | head -1)"
+
           if [ -z "$SETTINGS" ]; then
-            echo "Android project not found in v0.8.1 archive."
+            echo "ERROR: Android project not found."
             exit 1
           fi
+
           PROJECT_DIR="$(dirname "$SETTINGS")"
-          echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
-          echo "Android project: $PROJECT_DIR"
 
-      - name: Verify v0.8.1
-        working-directory: ${{ steps.project.outputs.dir }}
-        run: |
-          grep -R 'versionName = "0.8.1"' app/build.gradle.kts
-          grep -R 'versionCode = 29' app/build.gradle.kts
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Android project found at: $PROJECT_DIR"
 
-      - name: Install Gradle
+          test -f "$PROJECT_DIR/settings.gradle.kts"
+          test -f "$PROJECT_DIR/app/build.gradle.kts"
+
+          grep -Fq 'versionName = "0.8.1"' \
+            "$PROJECT_DIR/app/build.gradle.kts"
+
+          grep -Fq 'versionCode = 29' \
+            "$PROJECT_DIR/app/build.gradle.kts"
+
+          node --check \
+            "$PROJECT_DIR/app/src/main/assets/app.js"
+
+          echo "Execution Desk v0.8.1 source verified."
+
+      - name: Verify signing files
+        shell: bash
         run: |
-          wget -q https://services.gradle.org/distributions/gradle-8.2.1-bin.zip
-          unzip -q gradle-8.2.1-bin.zip
-          echo "$GITHUB_WORKSPACE/gradle-8.2.1/bin" >> "$GITHUB_PATH"
+          test -f "$PROJECT_DIR/app/executiondesk-update-key.jks"
+          test -f "$PROJECT_DIR/keystore.properties"
+
+          echo "Signing configuration found."
 
       - name: Build signed release APK
-        working-directory: ${{ steps.project.outputs.dir }}
+        shell: bash
         run: |
-          gradle --no-daemon clean assembleRelease
+          cd "$PROJECT_DIR"
 
-      - name: Verify APK exists
-        id: apk
-        working-directory: ${{ steps.project.outputs.dir }}
+          gradle :app:assembleRelease \
+            --no-daemon \
+            --stacktrace
+
+      - name: Locate and verify APK
+        shell: bash
         run: |
-          APK="$(find app/build/outputs/apk/release -type f -name '*.apk' | head -1)"
-          if [ -z "$APK" ]; then
-            echo "Release APK was not produced."
+          APK="$PROJECT_DIR/app/build/outputs/apk/release/app-release.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "ERROR: Release APK was not produced."
+            find "$PROJECT_DIR/app/build/outputs" -type f || true
             exit 1
           fi
-          echo "path=$APK" >> "$GITHUB_OUTPUT"
+
+          echo "APK produced:"
           ls -lh "$APK"
 
-      - name: Upload v0.8.1 APK
+          APKSIGNER="$ANDROID_HOME/build-tools/34.0.0/apksigner"
+
+          if [ -x "$APKSIGNER" ]; then
+            "$APKSIGNER" verify --verbose "$APK"
+          else
+            echo "WARNING: Android 34 apksigner not found at expected path."
+            echo "Searching installed build tools..."
+
+            APKSIGNER="$(find "$ANDROID_HOME/build-tools" \
+              -type f -name apksigner | sort -V | tail -1)"
+
+            if [ -z "$APKSIGNER" ]; then
+              echo "ERROR: apksigner not found."
+              exit 1
+            fi
+
+            "$APKSIGNER" verify --verbose "$APK"
+          fi
+
+          cp "$APK" \
+            "$GITHUB_WORKSPACE/ExecutionDesk-v081-Lunar-Campaign-Engine.apk"
+
+      - name: Upload Execution Desk v0.8.1 APK
         uses: actions/upload-artifact@v4
         with:
           name: execution-desk-v081-lunar-campaign-engine-apk
-          path: ${{ steps.project.outputs.dir }}/${{ steps.apk.outputs.path }}
+          path: ExecutionDesk-v081-Lunar-Campaign-Engine.apk
           if-no-files-found: error
+          retention-days: 30
